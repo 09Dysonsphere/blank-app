@@ -11,12 +11,14 @@ st.write(
 
 st.logo("images/300px-Endfield_Industries.webp")
 
-if "power" not in st.session_state:
-    st.session_state.power = 1100
+
 
 #battery values
 batteries = ["HC Valley", "SC Wuling"]
 power_list = [1100, 3200]
+
+if "power" not in st.session_state:
+    st.session_state.power = max(power_list)
 
 #choose battery
 battery_input = st.toggle("enter manually", False)
@@ -35,7 +37,7 @@ power = st.session_state.power
 st.write(f"Power: {power}")
 
 #more input
-battery_freq = st.number_input("Frequency", value=40, step=1)
+battery_freq = st.number_input("sec/battery input", value=40, step=1)
 req_power = st.number_input("Required Power", value = 1000, step = 1)
 full_batt = st.number_input(f"full batteries (rec: {math.floor((req_power-200)/power)})", 0, step = 1)
 
@@ -49,14 +51,14 @@ splits = splits_info.segmented_control("orange", range(depth+1), selection_mode=
 
 
 #table
-time = [battery_freq * 2**x for x in range(depth+1)]
-avg_power = [power * (40/battery_freq) / 2**x for x in range(depth+1)]
+time = [max(40, (battery_freq * 2**x)) for x in range(depth+1)]
+avg_power = [min(power, (power * (40/battery_freq)) / 2**x) for x in range(depth+1)]
 table = pd.DataFrame({"time":time, "avg power":avg_power})
 table.index.name = "splits"
 power_table = splits_select.table(table, width="content")
 
 #infomation
-remain_power = req_power - (full_batt * power) - sum([avg_power[x] for x in splits])
+remain_power = req_power - 200 - (full_batt * power) - sum([avg_power[x] for x in splits])
 splits_info.write(f"remaining power req: {remain_power}")
 distances = [abs(remain_power - avg_power[x]) for x in range(depth+1)]
 splits_info.write(f"closest: {distances.index(min(distances))}")
@@ -71,7 +73,7 @@ if auto_split:
     temp_remain = remain_power
     while True:
         if len(rec_split) > 0:
-            temp_remain = req_power - sum([avg_power[x] for x in rec_split])
+            temp_remain = req_power - 200 - (full_batt * power) - sum([avg_power[x] for x in rec_split])
         dist = [temp_remain - avg_power[x] for x in range(depth+1)]
         abs_dist = [abs(dist[x]) for x in range(depth+1)]
         close = [abs_dist.index(min(abs_dist)), min(abs_dist)]
@@ -118,3 +120,37 @@ if len(splits) > 0:
 
     st.write(f"drain : {max(downtimes) * ((full_batt * power) + 200 - req_power)}")
     st.write(f"downtime : {max(downtimes)}")
+#true drains
+    power_change = []
+    for i in range(len(downtimes)):
+        power_change.append(uptime[i])
+        power_change.append(downtimes[i])
+    removed = 0
+
+    for j in range(1, len(power_change), 2):
+        i = j - removed
+        if i == len(power_change) - 1:
+            break
+        if power_change[i] <= 0:
+            if len(power_change[i - 1]) == 2:
+                power_change[i - 1] = [power_change[i-1][0], power_change[i + 1][1], 2]
+            else:
+                power_change[i - 1] = [power_change[i-1][0], power_change[i + 1][1], power_change[i - 1][2] + 1]
+            del power_change[i:i+2]
+            removed =+ 2
+
+    power_changes = []
+    for i in range(len(power_change)):
+        if type(power_change[i]) == tuple:
+            power_changes.append((((full_batt + 1) * power) + 200 - req_power) * 40)
+        elif type(power_change[i]) == list:
+            power_changes.append((((full_batt + power_change[i][2]) * power) + 200 - req_power) * 40)
+        else:
+            power_changes.append(((full_batt * power) + 200 - req_power) * power_change[i])
+
+    power_values = [100000]
+    for i in range(len(power_changes)):
+        power_values.append(min(100000, power_values[i] + power_changes[i]))
+    power_values.append(min(100000, power_values[-1] + power_changes[0]))
+    if power_values[-1] < 100000:
+     st.write(f"end :{power_values[-1]}")
